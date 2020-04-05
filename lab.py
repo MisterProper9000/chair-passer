@@ -7,10 +7,18 @@ from skimage.feature import canny
 import matplotlib.pyplot as plt
 from matplotlib import cm
 import os
+from enum import Enum
+
 
 CHAIR_X_OFFSET = 200
 DOOR_LINE_ANGLE_EPS = 0.1
+TEST_ANS_FILE = "test_ans.txt"
 
+class Mode(Enum):
+   PREPARE = 1
+   TEST = 2
+
+MODE = Mode.TEST
 
 def chair_width(img):
     #img = cv2.imread("DataSetV2\\IMG_20200306_193234.jpg")
@@ -105,25 +113,55 @@ def width_door_hough(image):
     else:
         return -1
 
-
 directory = os.fsencode("DataSetV2")
+
+if MODE == Mode.PREPARE:
+   f = open(TEST_ANS_FILE, "w")
+
+if MODE == Mode.TEST:
+    test_ans = {}
+    with open(TEST_ANS_FILE) as f:
+       for line in f:
+          (key, val) = line.split()
+          test_ans[key] = val
+
+total = 0
+errors = 0
 
 for file in os.listdir(directory):
     filename = os.fsdecode(file)
-    if filename.endswith(".jpg"): 
-        img = cv2.imread("DataSetV2\\" + filename)
-        #img = rgb2gray(cv2.imread("Datas\\" + filename))
-        #img = cv2.resize(img, (int(img.shape[1] / 2), int(img.shape[0] / 2)))
-        door = width_door_hough(img)
-        chair = chair_width(img)
 
-        if (door == -1):
-            print('2')
-        else:
-            print('Door wight: ', door)
-            print('Chair width: ', chair)
-            print('result for ',filename,' is ', ('1' if (door < chair) else '0'))
+    if filename.endswith(".jpg"):
+       total += 1
 
+       if MODE == Mode.PREPARE:
+          
+          f.write(filename+"\n")
+
+       if MODE == Mode.TEST:
+           print(filename)
+
+           img = cv2.imread("DataSetV2\\" + filename)
+           #img = rgb2gray(cv2.imread("Datas\\" + filename))
+           #img = cv2.resize(img, (int(img.shape[1] / 2), int(img.shape[0] / 2)))
+           door = width_door_hough(img)
+           chair = chair_width(img)
+
+           if (door == -1):
+               print('2')
+           else:
+               result = '1' if (door < chair) else '0'
+               print('Door wight: ', door)
+               print('Chair width: ', chair)
+               print('result for ',filename,' is ', result)
+               if test_ans[filename] != result:
+                  errors += 1
+
+if MODE == Mode.PREPARE:
+   f.close()
+
+if MODE == Mode.TEST:
+   print("accuracy: %f" % (float(total-errors) / float(total)))
 
 cv2.waitKey(0)
 cv2.destroyAllWindows()
