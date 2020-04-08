@@ -8,10 +8,12 @@ import matplotlib.pyplot as plt
 from matplotlib import cm
 import os
 from enum import Enum
+import argparse
 
 
 CHAIR_X_OFFSET = 200
 DOOR_LINE_ANGLE_EPS = 0.1
+
 TEST_ANS_FILE = "test_ans.txt"
 
 class Mode(Enum):
@@ -100,6 +102,10 @@ def width_door_hough(image):
     dist_right = []
     middle = image.shape[1]/2
 
+    if cv2.waitKey(0) & 0xFF == ord('q'):  
+      cv2.destroyAllWindows() 
+
+
     h, theta, d = hough_line(canny(only_dark))
     for _, angle, dist in zip(*hough_line_peaks(h, theta, d)):
         if angle > -DOOR_LINE_ANGLE_EPS and angle < DOOR_LINE_ANGLE_EPS:
@@ -113,57 +119,68 @@ def width_door_hough(image):
     else:
         return -1
 
-directory = os.fsencode("DataSetV2")
 
-if MODE == Mode.PREPARE:
-   f = open(TEST_ANS_FILE, "w")
+if __name__ == '__main__':
+  ap = argparse.ArgumentParser()
+  ap.add_argument("-i", "--mode", required=False,
+    help="execution mode: 1 - PREPARE, 2 - TEST")
+  ap.add_argument("-s", "--dir", required=False,
+    help="path to the input images dir")
+  ap.add_argument("-f", "--test_file", required=False,
+    help="path to the input test answers file")
+  args = vars(ap.parse_args())
 
-if MODE == Mode.TEST:
-    test_ans = {}
-    with open(TEST_ANS_FILE) as f:
-       for line in f:
-          (key, val) = line.split()
-          test_ans[key] = val
+  MODE = Mode(Mode.TEST if args['mode'] is None else int(args['mode']))
+  directory = os.fsencode("DataSetV2" if args['dir'] is not None else args['dir'])
+  TEST_ANS_FILE = "test_ans.txt" if args['test_file'] is None else args['test_file']
 
-total = 0
-errors = 0
+  if MODE == Mode.PREPARE:
+     f = open(TEST_ANS_FILE, "w")
 
-for file in os.listdir(directory):
-    filename = os.fsdecode(file)
+  if MODE == Mode.TEST:
+      test_ans = {}
+      with open(TEST_ANS_FILE) as f:
+         for line in f:
+            (key, val) = line.split(" ")
+            test_ans[key] = val
 
-    if filename.endswith(".jpg"):
-       total += 1
+  total = 0
+  errors = 0
 
-       if MODE == Mode.PREPARE:
-          
-          f.write(filename+"\n")
+  for file in os.listdir(directory):
+      filename = os.fsdecode(file)
 
-       if MODE == Mode.TEST:
-           print(filename)
+      if filename.endswith(".jpg"):
+         total += 1
 
-           img = cv2.imread("DataSetV2\\" + filename)
-           #img = rgb2gray(cv2.imread("Datas\\" + filename))
-           #img = cv2.resize(img, (int(img.shape[1] / 2), int(img.shape[0] / 2)))
-           door = width_door_hough(img)
-           chair = chair_width(img)
+         if MODE == Mode.PREPARE:
+            
+            f.write(filename+"\n")
 
-           if (door == -1):
-               print('2')
-           else:
-               result = '1' if (door < chair) else '0'
-               print('Door wight: ', door)
-               print('Chair width: ', chair)
-               print('result for ',filename,' is ', result)
-               if test_ans[filename] != result:
-                  errors += 1
+         if MODE == Mode.TEST:
+             print(filename)
 
-if MODE == Mode.PREPARE:
-   f.close()
+             img = cv2.imread("DataSetV2\\" + filename)
+             #img = rgb2gray(cv2.imread("Datas\\" + filename))
+             #img = cv2.resize(img, (int(img.shape[1] / 2), int(img.shape[0] / 2)))
+             door = width_door_hough(img)
+             chair = chair_width(img)
 
-if MODE == Mode.TEST:
-   print("accuracy: %f" % (float(total-errors) / float(total)))
+             if (door == -1):
+                 print('2')
+             else:
+                 result = '1' if (door < chair) else '0'
+                 print('Door wight: ', door)
+                 print('Chair width: ', chair)
+                 print('result for',filename,'is', result, "expected", test_ans[filename])
+                 if test_ans[filename] != result:
+                    errors += 1
 
-cv2.waitKey(0)
-cv2.destroyAllWindows()
+  if MODE == Mode.PREPARE:
+     f.close()
 
+  if MODE == Mode.TEST:
+     print("accuracy: %f" % (float(total-errors) / float(total)))
 
+  cv2.waitKey(0)
+  cv2.destroyAllWindows()
