@@ -11,16 +11,40 @@ from enum import Enum
 import argparse
 
 
+from imageai.Detection import ObjectDetection
+
+execution_path = os.getcwd()
+
+
+
+
 CHAIR_X_OFFSET = 200
-DOOR_LINE_ANGLE_EPS = 0.1
+DOOR_LINE_ANGLE_EPS = 0.3
 
 TEST_ANS_FILE = "test_ans.txt"
 
 class Mode(Enum):
    PREPARE = 1
    TEST = 2
+   AI = 3
 
 MODE = Mode.TEST
+
+
+
+def chair_ai(detector, filename):
+
+    detections, extracted_images = detector.detectObjectsFromImage(input_image=filename, output_image_path=os.path.join(execution_path , "imagenew.jpg"), extract_detected_objects=True)
+
+    for eachObject in detections:
+        print(eachObject["name"] , " : " , eachObject["percentage_probability"] )
+        if eachObject["name"] == "chair":
+            #print(eachObject["box_points"])
+            return eachObject["box_points"][2] - eachObject["box_points"][0]
+    return -1
+
+
+
 
 def chair_width(img):
     #img = cv2.imread("DataSetV2\\IMG_20200306_193234.jpg")
@@ -103,7 +127,7 @@ def width_door_hough(image):
     middle = image.shape[1]/2
 
     if cv2.waitKey(0) & 0xFF == ord('q'):  
-      cv2.destroyAllWindows() 
+       cv2.destroyAllWindows() 
 
 
     h, theta, d = hough_line(canny(only_dark))
@@ -121,66 +145,98 @@ def width_door_hough(image):
 
 
 if __name__ == '__main__':
-  ap = argparse.ArgumentParser()
-  ap.add_argument("-i", "--mode", required=False,
-    help="execution mode: 1 - PREPARE, 2 - TEST")
-  ap.add_argument("-s", "--dir", required=False,
-    help="path to the input images dir")
-  ap.add_argument("-f", "--test_file", required=False,
-    help="path to the input test answers file")
-  args = vars(ap.parse_args())
+    ap = argparse.ArgumentParser()
+    ap.add_argument("-m", "--mode", required=False,
+     help="execution mode: 1 - PREPARE, 2 - TEST, 3 - AI detection")
+    ap.add_argument("-s", "--dir", required=False,
+     help="path to the input images dir")
+    ap.add_argument("-f", "--test_file", required=False,
+     help="path to the input test answers file")
+    args = vars(ap.parse_args())
 
-  MODE = Mode(Mode.TEST if args['mode'] is None else int(args['mode']))
-  directory = os.fsencode("DataSetV2" if args['dir'] is not None else args['dir'])
-  TEST_ANS_FILE = "test_ans.txt" if args['test_file'] is None else args['test_file']
+    MODE = Mode(Mode.TEST if args['mode'] is None else int(args['mode']))
+    directory = ("DataSetV2" if args['dir'] is None else args['dir'])
+    TEST_ANS_FILE = "test_ans.txt" if args['test_file'] is None else args['test_file']
+    print(directory)
+    
+    if MODE == Mode.PREPARE:
+        f = open(TEST_ANS_FILE, "w")
 
-  if MODE == Mode.PREPARE:
-     f = open(TEST_ANS_FILE, "w")
+    if MODE == Mode.AI:
+        detector = ObjectDetection()
+        detector.setModelTypeAsRetinaNet()
+        detector.setModelPath( os.path.join(execution_path , "resnet50_coco_best_v2.0.1.h5"))
+        detector.loadModel()
 
-  if MODE == Mode.TEST:
-      test_ans = {}
-      with open(TEST_ANS_FILE) as f:
-         for line in f:
-            (key, val) = line.split(" ")
-            test_ans[key] = val
+    if MODE == Mode.TEST or MODE == Mode.AI:
+        test_ans = {}
+        with open(TEST_ANS_FILE) as f:
+            for line in f:
+                (key, val) = line.split(" ")
+                test_ans[key] = val
 
-  total = 0
-  errors = 0
+    total = 0
+    errors = 0
 
-  for file in os.listdir(directory):
-      filename = os.fsdecode(file)
+    for file in os.listdir(directory):
+        filename = os.fsdecode(file)
 
-      if filename.endswith(".jpg"):
-         total += 1
+        if filename.endswith(".jpg"):
+            total += 1
+            print(MODE)
 
-         if MODE == Mode.PREPARE:
-            
-            f.write(filename+"\n")
+            if MODE == Mode.PREPARE:
+               
+                f.write(filename+"\n")
 
-         if MODE == Mode.TEST:
-             print(filename)
+            if MODE == Mode.TEST:
+                print(os.path.join(directory, filename, ""))
 
-             img = cv2.imread("DataSetV2\\" + filename)
-             #img = rgb2gray(cv2.imread("Datas\\" + filename))
-             #img = cv2.resize(img, (int(img.shape[1] / 2), int(img.shape[0] / 2)))
-             door = width_door_hough(img)
-             chair = chair_width(img)
+                img = cv2.imread(os.path.join(directory, filename))
+                #img = rgb2gray(cv2.imread("Datas\\" + filename))
+                #img = cv2.resize(img, (int(img.shape[1] / 2), int(img.shape[0] / 2)))
+                door = width_door_hough(img)
+                chair = chair_width(img)
 
-             if (door == -1):
-                 print('2')
-             else:
-                 result = '1' if (door < chair) else '0'
-                 print('Door wight: ', door)
-                 print('Chair width: ', chair)
-                 print('result for',filename,'is', result, "expected", test_ans[filename])
-                 if test_ans[filename] != result:
-                    errors += 1
+                if (door == -1 or chair == -1):
+                    result = '2'
+                    print('result for',filename,'is', result, "expected", test_ans[filename])
+                    if int(test_ans[filename]) != int(result):
+                        errors += 1
+                else:
+                    result = '1' if (door < chair) else '0'
+                    print('Door wight: ', door)
+                    print('Chair width: ', chair)
+                    print('result for',filename,'is', result, "expected", test_ans[filename])
+                    if int(test_ans[filename]) != int(result):
+                        errors += 1
 
-  if MODE == Mode.PREPARE:
-     f.close()
+            if MODE == Mode.AI:
+                print("errors", errors, "total", total)
+                print(os.path.join(directory, filename))
+                img = cv2.imread(os.path.join(directory, filename))
+                door = width_door_hough(img)
+                chair = chair_ai(detector, os.path.join(directory, filename))
 
-  if MODE == Mode.TEST:
-     print("accuracy: %f" % (float(total-errors) / float(total)))
+                if (door == -1 or chair == -1):
+                    result = '2'
+                    print('result for',filename,'is', result, "expected", test_ans[filename])
+                    if int(test_ans[filename]) != int(result):
+                        errors += 1
+                else:
+                    result = '1' if (door < chair) else '0'
+                    print('Door wight: ', door)
+                    print('Chair width: ', chair)
+                    print('result for',filename,'is', result, "expected", test_ans[filename])
+                    if int(test_ans[filename]) != int(result):
+                        errors += 1
 
-  cv2.waitKey(0)
-  cv2.destroyAllWindows()
+    if MODE == Mode.PREPARE:
+        f.close()
+
+    if MODE == Mode.TEST or MODE == Mode.AI:
+        print(total, errors)
+        print("accuracy: %f" % (float(total-errors) / float(total)))
+
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
