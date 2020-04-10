@@ -10,16 +10,25 @@ import os
 from enum import Enum
 import argparse
 
-
 from imageai.Detection import ObjectDetection
 
-execution_path = os.getcwd()
+import binascii
+import struct
+
+import scipy
+import scipy.misc
+import scipy.cluster
+import colorsys
 
 
-
+NUM_CLUSTERS_TEST = 10
+NUM_CLUSTERS_TEMPLATE = 3
+COLOR_OFFSET = 10
+BIN_COLORS = []
 
 CHAIR_X_OFFSET = 200
 DOOR_LINE_ANGLE_EPS = 0.3
+
 
 TEST_ANS_FILE = "test_ans.txt"
 
@@ -30,7 +39,7 @@ class Mode(Enum):
 
 MODE = Mode.TEST
 
-
+execution_path = os.getcwd()
 
 def chair_ai(detector, filename):
 
@@ -44,20 +53,107 @@ def chair_ai(detector, filename):
     return -1
 
 
+def get_bin_colors(filename):
+    im = cv2.imread(filename)
+    ar = np.asarray(im)
+    shape = ar.shape
+    ar = ar.reshape(np.product(shape[:2]), shape[2]).astype(float)
+
+    print('finding clusters')
+    codes, dist = scipy.cluster.vq.kmeans(ar, NUM_CLUSTERS_TEMPLATE)
+    print('cluster centres:\n', codes)
+
+    vecs, dist = scipy.cluster.vq.vq(ar, codes)         # assign codes
+    counts, bins = np.histogram(vecs, len(codes))    # count occurrences
+
+    index_max = np.argmax(counts)
+    codes = np.delete(codes, index_max, 0) # delete background color
+    dif = codes[1] - codes[0]
+    all_less = True
+    for i in range(0,3):
+        if dif[i] < 0:
+            all_less = False
+            break
+    if not all_less:
+        tmp = 0
+        for i in range(0,3):
+            tmp=codes[0][i]
+            codes[0][i] = codes[1][i]
+            codes[1][i] = tmp
+
+    print('chair cluster centres:\n', codes)
+
+    return codes
+
+def clusterization(img):
+    ar = np.asarray(img)
+    shape = ar.shape
+    ar = ar.reshape(np.product(shape[:2]), shape[2]).astype(float)
+
+    print('finding clusters')
+    codes, dist = scipy.cluster.vq.kmeans(ar, NUM_CLUSTERS_TEST)
+    print('cluster centres:\n', codes)
+
+    vecs, dist = scipy.cluster.vq.vq(ar, codes)         # assign codes
+    counts, bins = np.histogram(vecs, len(codes))    # count occurrences
+
+    index_max = np.argmax(counts)                    # find most frequent
+    peak = codes[index_max]
+    colour = binascii.hexlify(bytearray(int(c) for c in peak)).decode('ascii')
+    #print('most frequent is %s (#%s)' % (peak, colour))
+
+
+    c = ar.copy()
+    for i, code in enumerate(codes):
+        c[scipy.r_[np.where(vecs==i)],:] = code
+    clustered = c.reshape(*shape).astype(np.uint8)
+    print('end clustered image')
+    return clustered
 
 
 def chair_width(img):
-    #img = cv2.imread("DataSetV2\\IMG_20200306_193234.jpg")
-    lower_green = np.array([31,100,50], dtype=np.uint8)
-    upper_green = np.array([70,255,255], dtype=np.uint8)
-    image_hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)  
-    only_green = cv2.inRange(image_hsv, lower_green, upper_green)
+    #img = cv2.resize(img, (int(312*1.7), int(416*1.7)))
+    clustered = clusterization(img)
+    #to_show = cv2.resize(clustered, (int(312*1.7), int(416*1.7)))   
+    #cv2.imshow("e1", to_show)
+    #cv2.waitKey(0)
+    #cv2.destroyAllWindows()
 
 
-    vertical_indices = np.where(np.any(only_green, axis=1))[0]
+    #136.82386855 147.75381954  14.02565581
+    #79.41322415  91.13273038   8.65925202
+
+    #31,100,50
+    #70,255,255
+    lower_green = np.array(BIN_COLORS[0], dtype=np.uint8)
+    upper_green = np.array(BIN_COLORS[1], dtype=np.uint8)
+    
+
+   # print(lower_green, upper_green)
+    hsv_lower = colorsys.rgb_to_hsv(lower_green[0]/255., lower_green[1]/255., lower_green[2]/255.)
+    hsv_upper = colorsys.rgb_to_hsv(upper_green[0]/255., upper_green[1]/255., upper_green[2]/255.)
+    
+
+    hsv_lower = np.array([int(hsv_lower[0]*100), int(hsv_lower[1]*100), int(hsv_lower[2]*100)])
+    hsv_upper = np.array([int(hsv_upper[0]*100), int(hsv_upper[1]*100), int(hsv_upper[2]*100)])
+    for i in range(0,3):
+        hsv_upper[i] = min(100, hsv_upper[i]+COLOR_OFFSET)
+        hsv_lower[i] = max(0, hsv_lower[i]-COLOR_OFFSET)
+
+   # print(hsv_lower, hsv_upper)
+
+    image_hsv = cv2.cvtColor(clustered, cv2.COLOR_BGR2HSV)  
+    only_template_color = cv2.inRange(image_hsv, hsv_lower, hsv_upper)
+
+    #to_show = cv2.resize(only_template_color, (int(312*1.7), int(416*1.7)))   
+    #cv2.imshow("e2", to_show)
+    #cv2.waitKey(0)
+    #cv2.destroyAllWindows()
+
+    vertical_indices = np.where(np.any(only_template_color, axis=1))[0]
     top, bottom = vertical_indices[0], vertical_indices[-1]
 
-    horizontal_indices = np.where(np.any(only_green, axis=0))[0]
+    horizontal_indices = np.where(np.any(only_template_color, axis=0))[0]
     left_idx=0
     right_idx=-1
     left = horizontal_indices[left_idx]
@@ -66,7 +162,7 @@ def chair_width(img):
         left = horizontal_indices[left_idx]
         left_idx += 1
 
-    while (right > only_green.shape[1]-CHAIR_X_OFFSET):
+    while (right > only_template_color.shape[1]-CHAIR_X_OFFSET):
         right = horizontal_indices[right_idx]
         right_idx -= 1
     
@@ -77,7 +173,7 @@ def chair_width(img):
     #from matplotlib.patches import Rectangle
 
     #f, ax = plt.subplots(1, 1)
-    #ax.imshow(only_green)
+    #ax.imshow(only_template_color)
 
     corner = (left, top)
     height = bottom - top
@@ -85,7 +181,7 @@ def chair_width(img):
     return width
     #ax.add_patch(Rectangle(corner, width, height, linewidth=5, edgecolor='b', facecolor='none'))
     #plt.savefig("sas", bbox_inches='tight')
-    #cv2.imwrite('1.jpg', only_green)
+    #cv2.imwrite('1.jpg', only_template_color)
 
 
 def show_hough_transform(image, filename):
@@ -152,12 +248,14 @@ if __name__ == '__main__':
      help="path to the input images dir")
     ap.add_argument("-f", "--test_file", required=False,
      help="path to the input test answers file")
+    ap.add_argument("-t", "--template_dir", required=False,
+     help="path to the color templates directory and template file")
     args = vars(ap.parse_args())
 
     MODE = Mode(Mode.TEST if args['mode'] is None else int(args['mode']))
     directory = ("DataSetV2" if args['dir'] is None else args['dir'])
     TEST_ANS_FILE = "test_ans.txt" if args['test_file'] is None else args['test_file']
-    print(directory)
+    template_file = "template\\color_template_1_nice_back.jpg" if args['template_dir'] is None else args['template_dir']
     
     if MODE == Mode.PREPARE:
         f = open(TEST_ANS_FILE, "w")
@@ -174,6 +272,9 @@ if __name__ == '__main__':
             for line in f:
                 (key, val) = line.split(" ")
                 test_ans[key] = val
+
+    if MODE == MODE.TEST:
+        BIN_COLORS = get_bin_colors(template_file)
 
     total = 0
     errors = 0
@@ -230,7 +331,7 @@ if __name__ == '__main__':
                     print('result for',filename,'is', result, "expected", test_ans[filename])
                     if int(test_ans[filename]) != int(result):
                         errors += 1
-
+                
     if MODE == Mode.PREPARE:
         f.close()
 
